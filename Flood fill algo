@@ -1,65 +1,255 @@
-from collections import deque
+import pygame
+import random
+from collections import deque # For the BFS queue
 
-def flood_fill_maze(maze, start_row, start_col):
-    """
-    Performs a flood fill search on a maze to find all reachable cells.
+# Initialize Pygame
+pygame.init()
 
-    Args:
-        maze (list of list of str): The 2D maze grid.
-        start_row (int): The starting row.
-        start_col (int): The starting column.
+# --- Maze Configuration ---
+CELL_SIZE = 20  # Size of each cell in pixels
+MAZE_WIDTH = 40 # Number of cells wide
+MAZE_HEIGHT = 30 # Number of cells high
+WALL_THICKNESS = 2 # Thickness of walls in pixels
 
-    Returns:
-        list of tuples: A list of all coordinates (row, col) that are reachable.
-    """
-    rows = len(maze)
-    cols = len(maze[0])
-    
-    # Initialize a queue for BFS and a set for visited cells
-    q = deque([(start_row, start_col)])
-    visited = set([(start_row, start_col)])
-    
-    # List to store all reachable cells
-    reachable_cells = []
-    
-    # Define the possible directions of movement (up, down, left, right)
-    directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+# Calculate screen dimensions
+SCREEN_WIDTH = MAZE_WIDTH * CELL_SIZE
+SCREEN_HEIGHT = MAZE_HEIGHT * CELL_SIZE
+SCREEN_SIZE = (SCREEN_WIDTH, SCREEN_HEIGHT)
 
-    while q:
-        r, c = q.popleft()
-        reachable_cells.append((r, c))
+# Colors
+BLACK = (0, 0, 0)
+WHITE = (255, 255, 255)
+GREEN = (0, 200, 0) # Color for the start point
+RED = (200, 0, 0)   # Color for the end point
+BLUE_PATH = (0, 0, 255) # Color for the solution path
 
-        # Explore all valid neighbors
-        for dr, dc in directions:
-            nr, nc = r + dr, c + dc
+# Set up the display
+screen = pygame.display.set_mode(SCREEN_SIZE)
+pygame.display.set_caption("Random Maze Generator and Solver (Flood Fill)")
+font = pygame.font.Font(None, 24) # Font for messages
 
-            # Check if the new position is valid
-            if 0 <= nr < rows and 0 <= nc < cols and \
-               maze[nr][nc] != '#' and (nr, nc) not in visited:
-                
-                # Add the new cell to the queue and mark as visited
-                visited.add((nr, nc))
-                q.append((nr, nc))
+# --- Maze Cell Class ---
+class MazeCell:
+    def __init__(self, x, y):
+        self.x = x
+        self.y = y
+        self.walls = {'top': True, 'right': True, 'bottom': True, 'left': True}
+        self.visited = False       # Used for maze generation
+        self.is_solution = False   # True if this cell is part of the solution path
+        self.distance = -1         # Used for flood fill (distance from start)
 
-    return reachable_cells
+    def draw(self, surface):
+        x_coord = self.x * CELL_SIZE
+        y_coord = self.y * CELL_SIZE
 
-# --- Example Usage ---
+        # Draw walls
+        if self.walls['top']:
+            pygame.draw.line(surface, BLACK, (x_coord, y_coord), (x_coord + CELL_SIZE, y_coord), WALL_THICKNESS)
+        if self.walls['right']:
+            pygame.draw.line(surface, BLACK, (x_coord + CELL_SIZE, y_coord), (x_coord + CELL_SIZE, y_coord + CELL_SIZE), WALL_THICKNESS)
+        if self.walls['bottom']:
+            pygame.draw.line(surface, BLACK, (x_coord + CELL_SIZE, y_coord + CELL_SIZE), (x_coord, y_coord + CELL_SIZE), WALL_THICKNESS)
+        if self.walls['left']:
+            pygame.draw.line(surface, BLACK, (x_coord, y_coord + CELL_SIZE), (x_coord, y_coord), WALL_THICKNESS)
+
+# --- Maze Generation Algorithm (Depth-First Search) ---
+def generate_maze(grid):
+    stack = []
+    # Reset visited and solution flags for all cells
+    for row in grid:
+        for cell in row:
+            cell.visited = False
+            cell.is_solution = False
+            cell.distance = -1
+
+    # Start generation from a random cell
+    start_x, start_y = random.randint(0, MAZE_WIDTH - 1), random.randint(0, MAZE_HEIGHT - 1)
+    current_cell = grid[start_y][start_x]
+    current_cell.visited = True
+    stack.append(current_cell)
+
+    while stack:
+        neighbors = []
+        # Check unvisited neighbors
+        # Top
+        if current_cell.y > 0 and not grid[current_cell.y - 1][current_cell.x].visited:
+            neighbors.append(grid[current_cell.y - 1][current_cell.x])
+        # Right
+        if current_cell.x < MAZE_WIDTH - 1 and not grid[current_cell.y][current_cell.x + 1].visited:
+            neighbors.append(grid[current_cell.y][current_cell.x + 1])
+        # Bottom
+        if current_cell.y < MAZE_HEIGHT - 1 and not grid[current_cell.y + 1][current_cell.x].visited:
+            neighbors.append(grid[current_cell.y + 1][current_cell.x])
+        # Left
+        if current_cell.x > 0 and not grid[current_cell.y][current_cell.x - 1].visited:
+            neighbors.append(grid[current_cell.y][current_cell.x - 1])
+
+        if neighbors:
+            next_cell = random.choice(neighbors)
+            # Remove wall between current_cell and next_cell
+            if next_cell.x == current_cell.x + 1: # Next is right
+                current_cell.walls['right'] = False
+                next_cell.walls['left'] = False
+            elif next_cell.x == current_cell.x - 1: # Next is left
+                current_cell.walls['left'] = False
+                next_cell.walls['right'] = False
+            elif next_cell.y == current_cell.y + 1: # Next is bottom
+                current_cell.walls['bottom'] = False
+                next_cell.walls['top'] = False
+            elif next_cell.y == current_cell.y - 1: # Next is top
+                current_cell.walls['top'] = False
+                next_cell.walls['bottom'] = False
+
+            stack.append(next_cell)
+            current_cell = next_cell
+            current_cell.visited = True
+        else:
+            current_cell = stack.pop()
+
+# --- Maze Solving Algorithm (Flood Fill / BFS) ---
+def solve_maze_flood_fill(grid, start_cell, end_cell):
+    # Reset solution flags and distances for all cells
+    for row in grid:
+        for cell in row:
+            cell.is_solution = False
+            cell.distance = -1 # -1 indicates unvisited for flood fill
+
+    queue = deque()
+
+    # Start from the start_cell
+    start_cell.distance = 0
+    queue.append(start_cell)
+
+    # Perform BFS (Flood Fill)
+    path_found = False
+    while queue:
+        current_cell = queue.popleft()
+
+        if current_cell == end_cell:
+            path_found = True
+            break
+
+        # Define possible movements (dx, dy) and corresponding wall direction
+        movements = [
+            (0, -1, 'top'),    # Up
+            (1, 0, 'right'),   # Right
+            (0, 1, 'bottom'),  # Down
+            (-1, 0, 'left')    # Left
+        ]
+
+        for dx, dy, wall_dir in movements:
+            nx, ny = current_cell.x + dx, current_cell.y + dy
+
+            # Check bounds and if there's no wall
+            if (0 <= nx < MAZE_WIDTH and 0 <= ny < MAZE_HEIGHT and
+                not current_cell.walls[wall_dir]):
+                neighbor = grid[ny][nx]
+
+                # If neighbor hasn't been visited (distance is -1)
+                if neighbor.distance == -1:
+                    neighbor.distance = current_cell.distance + 1
+                    queue.append(neighbor)
+
+    # Reconstruct the shortest path if found
+    if path_found:
+        path_cell = end_cell
+        while path_cell != start_cell:
+            path_cell.is_solution = True
+            min_dist = path_cell.distance
+
+            # Find the neighbor with distance = min_dist - 1
+            for dx, dy, wall_dir in movements:
+                nx, ny = path_cell.x + dx, path_cell.y + dy
+
+                if (0 <= nx < MAZE_WIDTH and 0 <= ny < MAZE_HEIGHT and
+                    not path_cell.walls[wall_dir]):
+                    neighbor = grid[ny][nx]
+                    if neighbor.distance == min_dist - 1:
+                        path_cell = neighbor
+                        break
+        start_cell.is_solution = True # Mark start cell as part of the solution too
+        return True
+    return False
+
+
+# --- Main Game Loop ---
+def main():
+    # Create the grid of cells
+    grid = [[MazeCell(x, y) for x in range(MAZE_WIDTH)] for y in range(MAZE_HEIGHT)]
+
+    # Generate the maze
+    generate_maze(grid)
+
+    # Define start and end points
+    start_cell = grid[0][0]
+    end_cell = grid[MAZE_HEIGHT - 1][MAZE_WIDTH - 1]
+
+    show_flood_fill_solution = False
+
+    running = True
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_r: # Press 'R' to regenerate maze
+                    # Reset cells for regeneration
+                    grid = [[MazeCell(x, y) for x in range(MAZE_WIDTH)] for y in range(MAZE_HEIGHT)]
+                    generate_maze(grid)
+                    # Re-assign start and end cells after regeneration
+                    start_cell = grid[0][0]
+                    end_cell = grid[MAZE_HEIGHT - 1][MAZE_WIDTH - 1]
+                    show_flood_fill_solution = False # Hide solution on regeneration
+                if event.key == pygame.K_f: # Press 'F' to toggle flood fill solution
+                    show_flood_fill_solution = not show_flood_fill_solution
+                    if show_flood_fill_solution:
+                        # Solve the maze using flood fill when 'F' is pressed
+                        solve_maze_flood_fill(grid, start_cell, end_cell)
+                    else:
+                        # Clear solution path if hiding it
+                        for row in grid:
+                            for cell in row:
+                                cell.is_solution = False
+                                cell.distance = -1 # Clear distances too
+                if event.key == pygame.K_ESCAPE: # Press 'ESC' to quit
+                    running = False
+
+        # Drawing
+        screen.fill(WHITE) # Fill background with white
+
+        # Draw all maze cells
+        for row in grid:
+            for cell in row:
+                cell.draw(screen)
+
+        # Highlight start and end points
+        # Start cell
+        pygame.draw.rect(screen, GREEN, (start_cell.x * CELL_SIZE + WALL_THICKNESS,
+                                          start_cell.y * CELL_SIZE + WALL_THICKNESS,
+                                          CELL_SIZE - 2 * WALL_THICKNESS,
+                                          CELL_SIZE - 2 * WALL_THICKNESS))
+        # End cell
+        pygame.draw.rect(screen, RED, (end_cell.x * CELL_SIZE + WALL_THICKNESS,
+                                        end_cell.y * CELL_SIZE + WALL_THICKNESS,
+                                        CELL_SIZE - 2 * WALL_THICKNESS,
+                                        CELL_SIZE - 2 * WALL_THICKNESS))
+
+        # Draw solution path if enabled
+        if show_flood_fill_solution:
+            for row in grid:
+                for cell in row:
+                    if cell.is_solution and cell != start_cell and cell != end_cell:
+                        center_x = cell.x * CELL_SIZE + CELL_SIZE // 2
+                        center_y = cell.y * CELL_SIZE + CELL_SIZE // 2
+                        pygame.draw.circle(screen, BLUE_PATH, (center_x, center_y), CELL_SIZE // 4)
+
+        # Display instructions
+        instruction_text = font.render("Press 'R' to regenerate, 'F' to toggle flood fill solution, 'ESC' to quit", True, BLACK)
+        screen.blit(instruction_text, (5, 5))
+
+        pygame.display.flip() # Update the full display Surface to the screen
+
+    pygame.quit() # Uninitialize Pygame modules
+
 if __name__ == "__main__":
-    # Example maze (0 = path, 1 = wall)
-    sample_maze = [
-        ['#', '#', '#', '#', '#'],
-        ['#', ' ', ' ', ' ', '#'],
-        ['#', ' ', '#', ' ', '#'],
-        ['#', ' ', ' ', ' ', '#'],
-        ['#', '#', '#', '#', '#']
-    ]
-
-    start_row = 1
-    start_col = 1
-    
-    reachable = flood_fill_maze(sample_maze, start_row, start_col)
-    print(f"Starting at ({start_row}, {start_col}), the reachable cells are:")
-    print(reachable)
-
-    # Output: Starting at (1, 1), the reachable cells are:
-    # [(1, 1), (1, 2), (2, 1), (1, 3), (3, 1), (2, 3), (3, 2), (3, 3)]
+    main()
